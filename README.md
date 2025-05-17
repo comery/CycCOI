@@ -33,34 +33,38 @@ from icecream import ic
 
 #### (1) CycloneSEQ reads
 #### (2) primers list
- -	experiment_data/primer.lst  
-	
-	for     GGTCAACAAATCATAAAGATATTGG  
-	rev     TAAACTTCAGGGTGACCAAAAAATCA  
+primer.list
+```text
+for	TAAACTTCTGGATGTCCAAAAAATCA
+rev	TTTCAACAAATCATAAAGATATTGG
+```
+
+
 
 #### (3) index(barcodes for identifying samples in which plate) list
 
 plate.index.tsv
 
-P1	TCGGTCTTAGACG  
-P2	TGTGAAGTTGCCA  
-P3	AGATTCTACACAA  
-P4	ATGCGATTAATTG  
-P5	GGCTGTTACAACA  
+```
+P1	TCGGTCTTAGACG
+P2	TGTGAAGTTGCCA
+P3	AGATTCTACACAA
+P4	ATGCGATTAATTG
+P5	GGCTGTTACAACA
+```
 
-....  
 
 #### (4) index(barcodes for identifying samples in a plate) list
 
 cell.index.tsv
 
-001     AAAGC  
-002     AACAG  
-003     AACCT  
-004     AACTC  
+```text
+001     AAAGC 
+002     AACAG 
+003     AACCT 
+004     AACTC 
 005     AAGCA  
-...
-
+```
 
 
 ### Get start
