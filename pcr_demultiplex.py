@@ -198,38 +198,78 @@ class PCRDemultiplexer:
         Process single sequence, supporting both orientations of the structure
         """
         sequence = str(seq_record.seq)
+        logger = logging.getLogger('PCRDemultiplexer')
         
-        # 检查第一种情况：forward-reverse结构
-        # 分别检查正向和反向引物
+        # Record sequence ID for logging
+        logger.info(f"Processing sequence: {seq_record.id}")
+        
+        # Check first case: forward-reverse structure
         fp_pos = -1
         rp_rc_pos = -1
         
-        # 先尝试正向引物的精确匹配
+        # Try exact match for forward primer
         try:
             fp_pos = sequence.index(self.forward_primer)
+            logger.info(f"Forward primer exact match found at position {fp_pos}")
         except ValueError:
-            # 如果精确匹配失败，使用Smith-Waterman算法
+            # If exact match fails, use Smith-Waterman algorithm
             max_score, end_pos = self.smith_waterman(sequence, self.forward_primer)
             if max_score >= len(self.forward_primer) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_gap * 2):
                 fp_pos = end_pos - len(self.forward_primer)
+                logger.info(f"Forward primer fuzzy match found at position {fp_pos}, score: {max_score}")
+            else:
+                logger.info("Forward primer match failed")
         
-        # 如果找到正向引物，再尝试反向引物
         if fp_pos != -1:
-            # 尝试反向引物的精确匹配
             try:
                 rp_rc_pos = sequence.index(self.reverse_primer_rc)
+                logger.info(f"Reverse primer RC exact match found at position {rp_rc_pos}")
             except ValueError:
-                # 如果精确匹配失败，使用Smith-Waterman算法
                 max_score, end_pos = self.smith_waterman(sequence, self.reverse_primer_rc)
                 if max_score >= len(self.reverse_primer_rc) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_gap * 2):
                     rp_rc_pos = end_pos - len(self.reverse_primer_rc)
+                    logger.info(f"Reverse primer RC fuzzy match found at position {rp_rc_pos}, score: {max_score}")
+                else:
+                    logger.info("Reverse primer RC match failed")
 
         if fp_pos != -1 and rp_rc_pos != -1:
-            # 提取index序列
             forward_index_seq = sequence[fp_pos-self.index_length:fp_pos]
             reverse_index_rc_seq = sequence[rp_rc_pos+len(self.reverse_primer_rc):
                                          rp_rc_pos+len(self.reverse_primer_rc)+self.index_length]
             
+            logger.info(f"Forward index sequence: {forward_index_seq}")
+            logger.info(f"Reverse index RC sequence: {reverse_index_rc_seq}")
+            
+            # Match plate index
+            if forward_index_seq in self.plate_dict:
+                plate_id = self.plate_dict[forward_index_seq]
+                logger.info(f"Plate index exact match: {plate_id}")
+            else:
+                best_score = float('-inf')
+                for pid, index_seq in self.plate_indices:
+                    score = self.needleman_wunsch(forward_index_seq, index_seq)
+                    score_rc = self.needleman_wunsch(forward_index_seq, self.index_rc_cache[index_seq])
+                    max_score = max(score, score_rc)
+                    if max_score > best_score:
+                        best_score = max_score
+                        plate_id = pid
+                logger.info(f"Plate index fuzzy match: {plate_id}, score: {best_score}")
+            
+            # Match well index
+            if reverse_index_rc_seq in self.well_dict:
+                well_id = self.well_dict[reverse_index_rc_seq]
+                logger.info(f"Well index exact match: {well_id}")
+            else:
+                best_score = float('-inf')
+                for wid, index_seq in self.well_indices:
+                    score = self.needleman_wunsch(reverse_index_rc_seq, index_seq)
+                    score_rc = self.needleman_wunsch(reverse_index_rc_seq, self.index_rc_cache[index_seq])
+                    max_score = max(score, score_rc)
+                    if max_score > best_score:
+                        best_score = max_score
+                        well_id = wid
+                logger.info(f"Well index fuzzy match: {well_id}, score: {best_score}")
+
             plate_id = self.match_plate_index(forward_index_seq)
             well_id = self.match_well_index(reverse_index_rc_seq)
             
@@ -324,18 +364,20 @@ def setup_logger(log_file):
     logger = logging.getLogger('PCRDemultiplexer')
     logger.setLevel(logging.INFO)
     
-    # 文件处理器
+    # File handler
     fh = logging.FileHandler(log_file)
     fh.setLevel(logging.INFO)
     
-    # 控制台处理器
+    # Console handler
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
     
-    # 格式化器
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    fh.setFormatter(formatter)
-    ch.setFormatter(formatter)
+    # Create formatters and add them to the handlers
+    file_formatter = logging.Formatter('%(asctime)s\t%(levelname)s\t%(message)s')
+    console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    fh.setFormatter(file_formatter)
+    ch.setFormatter(console_formatter)
     
     logger.addHandler(fh)
     logger.addHandler(ch)
