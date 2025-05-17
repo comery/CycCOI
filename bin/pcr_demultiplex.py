@@ -241,41 +241,58 @@ class PCRDemultiplexer:
             logger.info(f"Reverse index RC sequence: {reverse_index_rc_seq}")
             
             # Match plate index
+            plate_id = None  # 初始化为None
             if forward_index_seq in self.plate_dict:
                 plate_id = self.plate_dict[forward_index_seq]
                 logger.info(f"Plate index exact match: {plate_id}")
             else:
                 best_score = float('-inf')
+                best_plate_id = None  # 初始化为None
                 for pid, index_seq in self.plate_indices:
                     score = self.needleman_wunsch(forward_index_seq, index_seq)
                     score_rc = self.needleman_wunsch(forward_index_seq, self.index_rc_cache[index_seq])
                     max_score = max(score, score_rc)
-                    if max_score > best_score:
-                        best_score = max_score
-                        plate_id = pid
-                logger.info(f"Plate index fuzzy match: {plate_id}, score: {best_score}")
+                    if max_score >= len(index_seq) - self.index_max_mismatch - self.index_max_gap:
+                        if max_score > best_score:
+                            best_score = max_score
+                            best_plate_id = pid
+                
+                if best_plate_id is not None:  # 只有在找到匹配时才赋值
+                    plate_id = best_plate_id
+                    logger.info(f"Plate index fuzzy match: {plate_id}, score: {best_score}")
+                else:
+                    logger.info(f"No valid plate index match found for sequence: {forward_index_seq}")
             
             # Match well index
+            well_id = None  # 初始化为None
             if reverse_index_rc_seq in self.well_dict:
                 well_id = self.well_dict[reverse_index_rc_seq]
                 logger.info(f"Well index exact match: {well_id}")
             else:
                 best_score = float('-inf')
+                best_well_id = None  # 初始化为None
                 for wid, index_seq in self.well_indices:
                     score = self.needleman_wunsch(reverse_index_rc_seq, index_seq)
                     score_rc = self.needleman_wunsch(reverse_index_rc_seq, self.index_rc_cache[index_seq])
                     max_score = max(score, score_rc)
-                    if max_score > best_score:
-                        best_score = max_score
-                        well_id = wid
-                logger.info(f"Well index fuzzy match: {well_id}, score: {best_score}")
+                    if max_score >= len(index_seq) - self.index_max_mismatch - self.index_max_gap:
+                        if max_score > best_score:
+                            best_score = max_score
+                            best_well_id = wid
+                
+                if best_well_id is not None:  # 只有在找到匹配时才赋值
+                    well_id = best_well_id
+                    logger.info(f"Well index fuzzy match: {well_id}, score: {best_score}")
+                else:
+                    logger.info(f"No valid well index match found for sequence: {reverse_index_rc_seq}")
 
             plate_id = self.match_plate_index(forward_index_seq)
             well_id = self.match_well_index(reverse_index_rc_seq)
             
             if plate_id and well_id:
-                return (plate_id, well_id, 
-                       sequence[fp_pos+len(self.forward_primer):rp_rc_pos])
+                # 对于forward-reverse结构，返回完整序列
+                return (plate_id, well_id,
+                       sequence[fp_pos-self.index_length:rp_rc_pos+len(self.reverse_primer_rc)+self.index_length])
                        
         # 检查第二种情况：reverse-forward结构
         # 同样分别检查正向和反向引物
@@ -313,8 +330,9 @@ class PCRDemultiplexer:
             well_id = self.match_well_index(reverse_index_seq)
 
             if plate_id and well_id:
+                # 对于reverse-forward结构，返回完整序列
                 return (plate_id, well_id,
-                       sequence[rp_pos+len(self.reverse_primer):fp_rc_pos])
+                       sequence[rp_pos-self.index_length:fp_rc_pos+len(self.forward_primer_rc)+self.index_length])
 
         return None
 
@@ -469,6 +487,19 @@ def main():
                       help='Number of processes for parallel processing, default uses all available CPU cores')
     
     args = parser.parse_args()
+    
+    # 检查所有输入文件是否存在
+    input_files = {
+        'Primer file': args.primer,
+        'Plate index file': args.plate_index,
+        'Well index file': args.well_index,
+        'Input FASTA file': args.fa
+    }
+    
+    for file_desc, file_path in input_files.items():
+        if not os.path.exists(file_path):
+            logger.error(f"{file_desc} not found: {file_path}")
+            sys.exit(1)
     
     # Set up logger
     logger = setup_logger(args.log)
