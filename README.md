@@ -7,10 +7,8 @@ A set of tootkit for dealing with COI amplicons using Cyclone sequencing platfor
 ### INSTALLATION
 - Clone from github
 ```bash
-$ git clone https://github.com/comery/HIFI-barcode-pacbio.git
+$ git clone https://github.com/comery/CycCOI.git
 ```
-- Download a ZIP file
-Go to website https://github.com/comery/HIFI-barcode-hiseq and click 'Download ZIP'
 ### Requirements 
 #### (1) python modules
 
@@ -33,25 +31,24 @@ from icecream import ic
 
 ### DATA requirements:
 
-#### (1) pacbio original H5 file input
- - 01.data/*.h5 ( linkage will be available soon )
+#### (1) CycloneSEQ reads
 #### (2) primers list
  -	experiment_data/primer.lst  
 	
 	for     GGTCAACAAATCATAAAGATATTGG  
-	rev     TAAACTTCAGGGTGACCAAAAAATCA
+	rev     TAAACTTCAGGGTGACCAAAAAATCA  
 
 #### (3) index(barcodes for identifying samples in which plate) list
 
 plate.index.tsv
 
-P1	TCGGTCTTAGACG
-P2	TGTGAAGTTGCCA
-P3	AGATTCTACACAA
-P4	ATGCGATTAATTG
-P5	GGCTGTTACAACA
+P1	TCGGTCTTAGACG  
+P2	TGTGAAGTTGCCA  
+P3	AGATTCTACACAA  
+P4	ATGCGATTAATTG  
+P5	GGCTGTTACAACA  
 
-....
+....  
 
 #### (4) index(barcodes for identifying samples in a plate) list
 
@@ -66,25 +63,21 @@ cell.index.tsv
 
 
 
-### Overview of steps
+### Get start
 
-### step 1 QC, filtering sequencing by length, gc and generate report figures
+1. QC, filtering sequencing by length, gc and generate report figures
 
 ```bash
 python3 bin/CycFqFilter.py -q 7 -l 700 -L 770 -g 0.2 -G 0.6 -o test.clean test.fastq.gz
 ```
 
-#### step 2 assign sequencing by plate index and well index
+2. assign sequencing by plate index and well index
+
 ```bash
 $ python bin/pcr_demultiplex.py -p primer.txt --plate-index plate.index.tsv --well-index cell.index.tsv -f test.clean.fa  -o output
 ```
 
 
-
-### CONTACT US
-
-Email:
-yangchentao at genomics dot cn
 
 
 
