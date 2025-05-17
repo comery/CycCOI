@@ -1,2 +1,90 @@
 # Cyclone-DNAbarcode-COI
+
+
+### DESCRIPTION
 A set of tootkit for dealing with COI amplicons using Cyclone sequencing platform
+
+### INSTALLATION
+- Clone from github
+```bash
+$ git clone https://github.com/comery/HIFI-barcode-pacbio.git
+```
+- Download a ZIP file
+Go to website https://github.com/comery/HIFI-barcode-hiseq and click 'Download ZIP'
+### Requirements 
+#### (1) python modules
+
+```
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
+import numpy as np
+from collections import defaultdict
+import argparse
+import logging
+import sys
+import os
+from multiprocessing import Pool
+import multiprocessing
+from icecream import ic
+```
+
+
+
+### DATA requirements:
+
+#### (1) pacbio original H5 file input
+ - 01.data/*.h5 ( linkage will be available soon )
+#### (2) primers list
+ -	experiment_data/primer.lst  
+	
+	for     GGTCAACAAATCATAAAGATATTGG  
+	rev     TAAACTTCAGGGTGACCAAAAAATCA
+
+#### (3) index(barcodes for identifying samples in which plate) list
+
+plate.index.tsv
+
+P1	TCGGTCTTAGACG
+P2	TGTGAAGTTGCCA
+P3	AGATTCTACACAA
+P4	ATGCGATTAATTG
+P5	GGCTGTTACAACA
+
+....
+
+#### (4) index(barcodes for identifying samples in a plate) list
+
+cell.index.tsv
+
+001     AAAGC  
+002     AACAG  
+003     AACCT  
+004     AACTC  
+005     AAGCA  
+...
+
+
+
+### Overview of steps
+
+### step 1 QC, filtering sequencing by length, gc and generate report figures
+
+```bash
+python3 bin/CycFqFilter.py -q 7 -l 700 -L 770 -g 0.2 -G 0.6 -o test.clean test.fastq.gz
+```
+
+#### step 2 assign sequencing by plate index and well index
+```bash
+$ python bin/pcr_demultiplex.py -p primer.txt --plate-index plate.index.tsv --well-index cell.index.tsv -f test.clean.fa  -o output
+```
+
+
+
+### CONTACT US
+
+Email:
+yangchentao at genomics dot cn
+
+
+
