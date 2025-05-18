@@ -4,15 +4,15 @@ from Bio.SeqRecord import SeqRecord
 import numpy as np
 from collections import defaultdict
 import argparse
+import logging
 import sys
 import os
-import time
 from multiprocessing import Pool
 import multiprocessing
 from icecream import ic
 
 class PCRDemultiplexer:
-    def __init__(self, forward_primer, reverse_primer, plate_indices, well_indices,
+    def __init__(self, forward_primer, reverse_primer, plate_indices, well_indices, 
                  primer_max_mismatch=3, primer_max_gap=1,
                  index_max_mismatch=4, index_max_gap=1):
         """
@@ -29,7 +29,7 @@ class PCRDemultiplexer:
         self.primer_max_gap = primer_max_gap
         self.index_max_mismatch = index_max_mismatch
         self.index_max_gap = index_max_gap
-
+        
         # 预计算所有可能需要的反向互补序列
         self.index_rc_cache = {}
         for _, index_seq in plate_indices + well_indices:
@@ -194,124 +194,100 @@ class PCRDemultiplexer:
         return best_match
     
     def process_sequence(self, seq_record):
+        """
+        Process single sequence, supporting both orientations of the structure
+        """
         sequence = str(seq_record.seq)
+        logger = logging.getLogger('PCRDemultiplexer')
         
-        print("==========================================")
-        print(f"Processing sequence: {seq_record.id}")
+        # Record sequence ID for logging
+        logger.info(f"Processing sequence: {seq_record.id}")
         
-        # Initialize plate_id and well_id as None at the start
-        plate_id = None
-        well_id = None
-        
-        # Forward-reverse structure
+        # Check first case: forward-reverse structure
         fp_pos = -1
         rp_rc_pos = -1
         
         # Try exact match for forward primer
         try:
             fp_pos = sequence.index(self.forward_primer)
-            print(f"Forward primer: EXACT match at position {fp_pos}")
+            logger.info(f"Forward primer exact match found at position {fp_pos}")
         except ValueError:
+            # If exact match fails, use Smith-Waterman algorithm
             max_score, end_pos = self.smith_waterman(sequence, self.forward_primer)
             if max_score >= len(self.forward_primer) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_gap * 2):
                 fp_pos = end_pos - len(self.forward_primer)
-                mismatches = len(self.forward_primer) * 2 - max_score
-                gaps = mismatches // 2
-                mismatches = mismatches - (gaps * 2)
-                print(f"Forward primer: FUZZY match at position {fp_pos}")
-                print(f"Score: {max_score}, Mismatches: {mismatches}, Gaps: {gaps}")
+                logger.info(f"Forward primer fuzzy match found at position {fp_pos}, score: {max_score}")
             else:
-                print("Forward primer: NO match found")
+                logger.info("Forward primer match failed")
         
-        # if find forward primer, try to find reverse primer
         if fp_pos != -1:
             try:
                 rp_rc_pos = sequence.index(self.reverse_primer_rc)
-                print(f"Reverse primer RC exact match found at position {rp_rc_pos}")
+                logger.info(f"Reverse primer RC exact match found at position {rp_rc_pos}")
             except ValueError:
                 max_score, end_pos = self.smith_waterman(sequence, self.reverse_primer_rc)
                 if max_score >= len(self.reverse_primer_rc) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_gap * 2):
                     rp_rc_pos = end_pos - len(self.reverse_primer_rc)
-                    print(f"Reverse primer RC fuzzy match found at position {rp_rc_pos}, score: {max_score}")
+                    logger.info(f"Reverse primer RC fuzzy match found at position {rp_rc_pos}, score: {max_score}")
                 else:
-                    print("Reverse primer RC match failed")
-        
-        # if find forward primer and reverse primer, try to find index
+                    logger.info("Reverse primer RC match failed")
+
         if fp_pos != -1 and rp_rc_pos != -1:
             forward_index_seq = sequence[fp_pos-self.index_length:fp_pos]
             reverse_index_rc_seq = sequence[rp_rc_pos+len(self.reverse_primer_rc):
                                          rp_rc_pos+len(self.reverse_primer_rc)+self.index_length]
             
-            print(f"Forward index sequence: {forward_index_seq}")
-            print(f"Reverse index RC sequence: {reverse_index_rc_seq}")
+            logger.info(f"Forward index sequence: {forward_index_seq}")
+            logger.info(f"Reverse index RC sequence: {reverse_index_rc_seq}")
             
             # Match plate index
-            plate_id = None  # Reset plate_id before matching
+            plate_id = None  # 初始化为None
             if forward_index_seq in self.plate_dict:
                 plate_id = self.plate_dict[forward_index_seq]
-                print(f"Plate index: EXACT match -> {plate_id}")
+                logger.info(f"Plate index exact match: {plate_id}")
             else:
                 best_score = float('-inf')
-                best_plate_id = None
-                best_mismatches = 0
-                best_gaps = 0
-                
+                best_plate_id = None  # 初始化为None
                 for pid, index_seq in self.plate_indices:
                     score = self.needleman_wunsch(forward_index_seq, index_seq)
                     score_rc = self.needleman_wunsch(forward_index_seq, self.index_rc_cache[index_seq])
                     max_score = max(score, score_rc)
-                    
                     if max_score >= len(index_seq) - self.index_max_mismatch - self.index_max_gap:
-                        mismatches = len(index_seq) * 2 - max_score
-                        gaps = mismatches // 2
-                        mismatches = mismatches - (gaps * 2)
-                        
                         if max_score > best_score:
                             best_score = max_score
                             best_plate_id = pid
-                            best_mismatches = mismatches
-                            best_gaps = gaps
                 
-                if best_plate_id is not None:
+                if best_plate_id is not None:  # 只有在找到匹配时才赋值
                     plate_id = best_plate_id
-                    print(f"Plate index: FUZZY match -> {plate_id}")
-                    print(f"Score: {best_score}, Mismatches: {best_mismatches}, Gaps: {best_gaps}")
+                    logger.info(f"Plate index fuzzy match: {plate_id}, score: {best_score}")
                 else:
-                    print("Plate index: NO match found")
+                    logger.info(f"No valid plate index match found for sequence: {forward_index_seq}")
             
             # Match well index
-            well_id = None  # Reset well_id before matching
+            well_id = None  # 初始化为None
             if reverse_index_rc_seq in self.well_dict:
                 well_id = self.well_dict[reverse_index_rc_seq]
-                print(f"Well index: EXACT match -> {well_id}")
+                logger.info(f"Well index exact match: {well_id}")
             else:
                 best_score = float('-inf')
-                best_well_id = None
-                best_mismatches = 0
-                best_gaps = 0
-                
+                best_well_id = None  # 初始化为None
                 for wid, index_seq in self.well_indices:
                     score = self.needleman_wunsch(reverse_index_rc_seq, index_seq)
                     score_rc = self.needleman_wunsch(reverse_index_rc_seq, self.index_rc_cache[index_seq])
                     max_score = max(score, score_rc)
-                    
                     if max_score >= len(index_seq) - self.index_max_mismatch - self.index_max_gap:
-                        mismatches = len(index_seq) * 2 - max_score
-                        gaps = mismatches // 2
-                        mismatches = mismatches - (gaps * 2)
-                        
                         if max_score > best_score:
                             best_score = max_score
                             best_well_id = wid
-                            best_mismatches = mismatches
-                            best_gaps = gaps
                 
-                if best_well_id is not None:
+                if best_well_id is not None:  # 只有在找到匹配时才赋值
                     well_id = best_well_id
-                    print(f"Well index: FUZZY match -> {well_id}")
-                    print(f"Score: {best_score}, Mismatches: {best_mismatches}, Gaps: {best_gaps}")
+                    logger.info(f"Well index fuzzy match: {well_id}, score: {best_score}")
                 else:
-                    print("Well index: NO match found")
+                    logger.info(f"No valid well index match found for sequence: {reverse_index_rc_seq}")
+
+            plate_id = self.match_plate_index(forward_index_seq)
+            well_id = self.match_well_index(reverse_index_rc_seq)
             
             if plate_id and well_id:
                 # 对于forward-reverse结构，返回完整序列
@@ -326,182 +302,105 @@ class PCRDemultiplexer:
         # 先尝试反向引物的精确匹配
         try:
             rp_pos = sequence.index(self.reverse_primer)
-            print(f"Reverse primer: EXACT match at position {rp_pos}")
         except ValueError:
             # 如果精确匹配失败，使用Smith-Waterman算法
             max_score, end_pos = self.smith_waterman(sequence, self.reverse_primer)
             if max_score >= len(self.reverse_primer) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_gap * 2):
                 rp_pos = end_pos - len(self.reverse_primer)
-                mismatches = len(self.reverse_primer) * 2 - max_score
-                gaps = mismatches // 2
-                mismatches = mismatches - (gaps * 2)
-                print(f"Reverse primer: FUZZY match at position {rp_pos}")
-                print(f"Score: {max_score}, Mismatches: {mismatches}, Gaps: {gaps}")
-            else:
-                print("Reverse primer: NO match found")
 
         # 如果找到反向引物，再尝试正向引物
         if rp_pos != -1:
+            # 尝试正向引物的精确匹配
             try:
                 fp_rc_pos = sequence.index(self.forward_primer_rc)
-                print(f"Forward primer RC: EXACT match at position {fp_rc_pos}")
-                
             except ValueError:
+                # 如果精确匹配失败，使用Smith-Waterman算法
                 max_score, end_pos = self.smith_waterman(sequence, self.forward_primer_rc)
                 if max_score >= len(self.forward_primer_rc) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_gap * 2):
                     fp_rc_pos = end_pos - len(self.forward_primer_rc)
-                    mismatches = len(self.forward_primer_rc) * 2 - max_score
-                    gaps = mismatches // 2
-                    mismatches = mismatches - (gaps * 2)
-                    print(f"Forward primer RC: FUZZY match at position {fp_rc_pos}")
-                    print(f"Score: {max_score}, Mismatches: {mismatches}, Gaps: {gaps}")
-                else:
-                    print("Forward primer RC: NO match found")
-        
-        # if find reverse primer and forward primer, try to find index
+
         if rp_pos != -1 and fp_rc_pos != -1:
             # 提取index序列
             reverse_index_seq = sequence[rp_pos-self.index_length:rp_pos]
             forward_index_rc_seq = sequence[fp_rc_pos+len(self.forward_primer_rc):
                                          fp_rc_pos+len(self.forward_primer_rc)+self.index_length]
-            
-            print(f"Reverse index sequence: {reverse_index_seq}")
-            print(f"Forward index RC sequence: {forward_index_rc_seq}")
-            
-            # 修改这里：使用新的匹配方法并记录日志
-            # Match plate index
-            if forward_index_rc_seq in self.plate_dict:
-                plate_id = self.plate_dict[forward_index_rc_seq]
-                print(f"Plate index: EXACT match -> {plate_id}")
-            else:
-                best_score = float('-inf')
-                best_plate_id = None
-                best_mismatches = 0
-                best_gaps = 0
-                
-                for pid, index_seq in self.plate_indices:
-                    score = self.needleman_wunsch(forward_index_rc_seq, index_seq)
-                    score_rc = self.needleman_wunsch(forward_index_rc_seq, self.index_rc_cache[index_seq])
-                    max_score = max(score, score_rc)
-                    
-                    if max_score >= len(index_seq) - self.index_max_mismatch - self.index_max_gap:
-                        mismatches = len(index_seq) * 2 - max_score
-                        gaps = mismatches // 2
-                        mismatches = mismatches - (gaps * 2)
-                        
-                        if max_score > best_score:
-                            best_score = max_score
-                            best_plate_id = pid
-                            best_mismatches = mismatches
-                            best_gaps = gaps
-                
-                if best_plate_id is not None:
-                    plate_id = best_plate_id
-                    print(f"Plate index: FUZZY match -> {plate_id}")
-                    print(f"Score: {best_score}, Mismatches: {best_mismatches}, Gaps: {best_gaps}")
-                else:
-                    print("Plate index: NO match found")
 
-            # Match well index
-            if reverse_index_seq in self.well_dict:
-                well_id = self.well_dict[reverse_index_seq]
-                print(f"Well index: EXACT match -> {well_id}")
-            else:
-                best_score = float('-inf')
-                best_well_id = None
-                best_mismatches = 0
-                best_gaps = 0
-                
-                for wid, index_seq in self.well_indices:
-                    score = self.needleman_wunsch(reverse_index_seq, index_seq)
-                    score_rc = self.needleman_wunsch(reverse_index_seq, self.index_rc_cache[index_seq])
-                    max_score = max(score, score_rc)
-                    
-                    if max_score >= len(index_seq) - self.index_max_mismatch - self.index_max_gap:
-                        mismatches = len(index_seq) * 2 - max_score
-                        gaps = mismatches // 2
-                        mismatches = mismatches - (gaps * 2)
-                        
-                        if max_score > best_score:
-                            best_score = max_score
-                            best_well_id = wid
-                            best_mismatches = mismatches
-                            best_gaps = gaps
-                
-                if best_well_id is not None:
-                    well_id = best_well_id
-                    print(f"Well index: FUZZY match -> {well_id}")
-                    print(f"Score: {best_score}, Mismatches: {best_mismatches}, Gaps: {best_gaps}")
-                else:
-                    print("Well index: NO match found")
-            
+            # 修改这里：使用新的匹配方法
+            plate_id = self.match_plate_index(forward_index_rc_seq)
+            well_id = self.match_well_index(reverse_index_seq)
+
             if plate_id and well_id:
                 # 对于reverse-forward结构，返回完整序列
                 return (plate_id, well_id,
-                   sequence[rp_pos-self.index_length:fp_rc_pos+len(self.forward_primer_rc)+self.index_length])
+                       sequence[rp_pos-self.index_length:fp_rc_pos+len(self.forward_primer_rc)+self.index_length])
 
         return None
 
-    def demultiplex(self, input_file, output_dir, num_processes=None, chunk_size=10000):
+    def demultiplex(self, input_file, output_dir, num_processes=None):
         """
-        按块读取并处理FASTA文件，支持多进程
-        参数:
-            input_file: 输入文件路径
-            output_dir: 输出目录
-            num_processes: 进程数，默认为CPU核心数
-            chunk_size: 每次读取的序列数量，默认为10000
+        Demultiplex input FASTA file with multi-processing support
+        Organize output by plate ID and well ID
         """
         if num_processes is None:
             num_processes = multiprocessing.cpu_count()
             
         # 创建输出目录
         os.makedirs(output_dir, exist_ok=True)
+            
+        # 读取所有序列记录
+        records = list(SeqIO.parse(input_file, "fasta"))
         
         # 创建进程池
-        pool = Pool(processes=num_processes)
-        
-        # 用于存储所有结果的字典
-        results = defaultdict(list)
-        
-        # 分块读取并处理序列
-        sequences = []
-        for record in SeqIO.parse(input_file, "fasta"):
-            sequences.append(record)
+        with Pool(processes=num_processes) as pool:
+            results = pool.map(self.process_sequence, records)
             
-            # 当累积的序列达到chunk_size时，进行处理
-            if len(sequences) >= chunk_size:
-                # 处理当前批次的序列
-                chunk_results = pool.map(self.process_sequence, sequences)
-                
-                # 将结果添加到总结果中
-                for result in chunk_results:
-                    if result:
-                        plate_id, well_id, sequence = result
-                        results[f"{plate_id}_{well_id}"].append(sequence)
-                
-                # 清空序列列表，准备下一批
-                sequences = []
+        # 按板子编号组织结果
+        plate_well_records = defaultdict(lambda: defaultdict(list))
+        for record, result in zip(records, results):
+            if result:
+                plate_id, well_id, sequence = result
+                new_record = SeqRecord(
+                    Seq(sequence),
+                    id=f"{record.id}_{plate_id}_{well_id}",
+                    description=""
+                )
+                plate_well_records[plate_id][well_id].append(new_record)
         
-        # 处理剩余的序列
-        if sequences:
-            chunk_results = pool.map(self.process_sequence, sequences)
-            for result in chunk_results:
-                if result:
-                    plate_id, well_id, sequence = result
-                    results[f"{plate_id}_{well_id}"].append(sequence)
-        
-        # 关闭进程池
-        pool.close()
-        pool.join()
-        
-        # 将结果写入文件
-        for combined_id, sequences in results.items():
-            output_file = os.path.join(output_dir, f"{combined_id}.fa")
-            with open(output_file, "w") as f:
-                for i, seq in enumerate(sequences):
-                    f.write(f">{combined_id}_{i+1}\n{seq}\n")
-        
-        return results
+        # 写入文件
+        for plate_id, well_records in plate_well_records.items():
+            # 在输出目录下创建孔的文件
+            for well_id, records in well_records.items():
+                output_file = os.path.join(output_dir, f"{plate_id}_{well_id}.fasta")
+                SeqIO.write(records, output_file, "fasta")
+            
+        return plate_well_records
+
+def setup_logger(log_file):
+    """
+    Set up logging configuration
+    """
+    logger = logging.getLogger('PCRDemultiplexer')
+    logger.setLevel(logging.INFO)
+    
+    # File handler
+    fh = logging.FileHandler(log_file)
+    fh.setLevel(logging.INFO)
+    
+    # Console handler
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    
+    # Create formatters and add them to the handlers
+    file_formatter = logging.Formatter('%(asctime)s\t%(levelname)s\t%(message)s')
+    console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    fh.setFormatter(file_formatter)
+    ch.setFormatter(console_formatter)
+    
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    
+    return logger
 
 def read_plate_index_file(plate_index_file):
     """
@@ -582,11 +481,11 @@ def main():
                       help='Maximum number of gaps allowed for index')
     parser.add_argument('-o', '--output', required=True,
                       help='Output directory path')
+    parser.add_argument('-l', '--log', default='demultiplex.log',
+                      help='Log file path')
     parser.add_argument('-n', '--num_processes', type=int, default=None,
                       help='Number of processes for parallel processing, default uses all available CPU cores')
-    parser.add_argument('-c', '--chunk_size', type=int, default=10000,
-                      help='Number of sequences to process in each chunk')
-
+    
     args = parser.parse_args()
     
     # 检查所有输入文件是否存在
@@ -597,46 +496,47 @@ def main():
         'Input FASTA file': args.fa
     }
     
-
     for file_desc, file_path in input_files.items():
         if not os.path.exists(file_path):
-            print(f"Error: {file_desc} not found: {file_path}")
+            logger.error(f"{file_desc} not found: {file_path}")
             sys.exit(1)
+    
+    # Set up logger
+    logger = setup_logger(args.log)
     
     # Read primer sequences
     forward_primer, reverse_primer = read_primer_file(args.primer)
     if not forward_primer or not reverse_primer:
-        print("Error: Failed to read sequences from primer file")
+        logger.error("Failed to read sequences from primer file")
         sys.exit(1)
     
     # Read plate and well index sequences
     plate_indices = read_plate_index_file(args.plate_index)
     well_indices = read_well_index_file(args.well_index)
     if not plate_indices or not well_indices:
-        print("Error: Failed to read sequences from index files")
+        logger.error("Failed to read sequences from index files")
         sys.exit(1)
-
-    print(f"Processing file: {args.fa}")
-    print(f"Forward Primer: {forward_primer}")
-    print(f"Reverse Primer: {reverse_primer}")
-    print(f"Loaded {len(plate_indices)} plate indices and {len(well_indices)} well indices")
+    
+    logger.info(f"Processing file: {args.fa}")
+    logger.info(f"Forward Primer: {forward_primer}")
+    logger.info(f"Reverse Primer: {reverse_primer}")
+    logger.info(f"Loaded {len(plate_indices)} plate indices and {len(well_indices)} well indices")
     
     # Create demultiplexer instance
-    demultiplexer = PCRDemultiplexer(forward_primer, reverse_primer,
-                                    plate_indices, well_indices,
-                                    args.primer_max_mismatch, args.primer_max_gap,
-                                    args.index_max_mismatch, args.index_max_gap
-                                    )
-
+    demultiplexer = PCRDemultiplexer(
+        forward_primer, reverse_primer, plate_indices, well_indices,
+        args.primer_max_mismatch, args.primer_max_gap,
+        args.index_max_mismatch, args.index_max_gap
+    )
+    
     # Process sequences
     try:
         results = demultiplexer.demultiplex(args.fa, args.output, args.num_processes)
-        print("==========================================")
-        print(f"Sequence demultiplexing completed, processed {sum(len(records) for records in results.values())} sequences")
+        logger.info(f"Sequence demultiplexing completed, processed {sum(len(records) for records in results.values())} sequences")
         for combined_id, records in results.items():
-            print(f"ID {combined_id}: {len(records)} sequences")
+            logger.info(f"ID {combined_id}: {len(records)} sequences")
     except Exception as e:
-        print(f"Error occurred during processing: {str(e)}")
+        logger.error(f"Error occurred during processing: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
