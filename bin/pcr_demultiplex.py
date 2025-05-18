@@ -602,7 +602,11 @@ def main():
         if not os.path.exists(file_path):
             print(f"Error: {file_desc} not found: {file_path}")
             sys.exit(1)
-    
+
+    if os.path.exists(args.output) == True:
+        print(f"Error: {args.output} has existed, please remove it first")
+        sys.exit(1)
+
     # Read primer sequences
     forward_primer, reverse_primer = read_primer_file(args.primer)
     if not forward_primer or not reverse_primer:
