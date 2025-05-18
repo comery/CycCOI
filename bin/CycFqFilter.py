@@ -6,12 +6,11 @@ import argparse
 from matplotlib import pylab
 import pylab as plt
 import seaborn as sns
-import numpy as np  # 取消注释，导入numpy
+import numpy as np
 import pandas as pd
 import mappy as mp
 import matplotlib.patches as patches
 from Bio.SeqUtils import gc_fraction
-#from icecream import ic
 
 def stat_plot(df, df_filtered=None, ax=None, outpre="Cyclone"):
     # quality plot, boxplot
@@ -19,19 +18,19 @@ def stat_plot(df, df_filtered=None, ax=None, outpre="Cyclone"):
     plt.figure(figsize=(12,5))
     if df_filtered is not None:
         # 创建并排的箱线图，设置不同的颜色
-        bp = plt.boxplot([df['quality'], df_filtered['quality']], 
+        bp = plt.boxplot([df['quality'], df_filtered['quality']],
                         labels=['Raw Data', 'Filtered Data'],
-                        patch_artist=True)  # 允许填充颜色
-        
+                        patch_artist=True)
+
         # 设置箱体颜色
-        bp['boxes'][0].set_facecolor('#74a892')  # 修改颜色
-        bp['boxes'][1].set_facecolor('#008585')  # 修改颜色
-        
+        bp['boxes'][0].set_facecolor('#74a892')
+        bp['boxes'][1].set_facecolor('#008585')
+
         plt.ylabel('Quality Score')
     else:
         bp = plt.boxplot([df['quality']], labels=['Raw Data'],
                         patch_artist=True)
-        bp['boxes'][0].set_facecolor('#74a892')  # 修改颜色
+        bp['boxes'][0].set_facecolor('#74a892')
         plt.ylabel('Quality Score')
     plt.title('Sequence Quality Distribution')
     plt.savefig(qual_output, format='pdf')
@@ -44,13 +43,13 @@ def stat_plot(df, df_filtered=None, ax=None, outpre="Cyclone"):
         # 计算合适的binwidth
         gc_binwidth = 0.02  # GC含量每2%一个bin
         gc_bins = np.arange(0, 1 + gc_binwidth, gc_binwidth)
-        plt.hist(df['gc'], bins=gc_bins, alpha=0.7, color='#74a892', label='Raw Data')  # 修改颜色
-        plt.hist(df_filtered['gc'], bins=gc_bins, alpha=0.7, color='#008585', label='Filtered Data')  # 修改颜色
+        plt.hist(df['gc'], bins=gc_bins, alpha=0.7, color='#74a892', label='Raw Data')
+        plt.hist(df_filtered['gc'], bins=gc_bins, alpha=0.7, color='#008585', label='Filtered Data')
         plt.legend()
     else:
         gc_binwidth = 0.02
         gc_bins = np.arange(0, 1 + gc_binwidth, gc_binwidth)
-        plt.hist(df['gc'], bins=gc_bins, alpha=0.7, color='#74a892')  # 修改颜色
+        plt.hist(df['gc'], bins=gc_bins, alpha=0.7, color='#74a892')
     plt.xlabel('GC Content')
     plt.ylabel('Count')
     plt.title('GC Content Distribution')
@@ -66,14 +65,14 @@ def stat_plot(df, df_filtered=None, ax=None, outpre="Cyclone"):
         length_max = max(df['length'].max(), df_filtered['length'].max())
         length_min = min(df['length'].min(), df_filtered['length'].min())
         length_bins = np.arange(length_min, length_max + length_binwidth, length_binwidth)
-        
-        plt.hist(df['length'], bins=length_bins, alpha=0.7, color='#74a892', label='Raw Data')  # 修改颜色
-        plt.hist(df_filtered['length'], bins=length_bins, alpha=0.7, color='#008585', label='Filtered Data')  # 修改颜色
+
+        plt.hist(df['length'], bins=length_bins, alpha=0.7, color='#74a892', label='Raw Data')
+        plt.hist(df_filtered['length'], bins=length_bins, alpha=0.7, color='#008585', label='Filtered Data')
         plt.legend()
     else:
         length_binwidth = 100
         length_bins = np.arange(df['length'].min(), df['length'].max() + length_binwidth, length_binwidth)
-        plt.hist(df['length'], bins=length_bins, alpha=0.7, color='#74a892')  # 修改颜色
+        plt.hist(df['length'], bins=length_bins, alpha=0.7, color='#74a892')
     plt.xlabel('Read Length')
     plt.ylabel('Count')
     plt.title('Read Length Distribution')
@@ -92,39 +91,39 @@ def main(args):
         if os.path.exists(outfile) == True:
             sys.exit(f"{outfile} has existed, please check!")
         fo = gzip.open(args.outpre + ".clean.fq.gz", 'wt')
-    
+
     # Create new lists for filtered data
     filtered_ids = []
     filtered_quality = []
     filtered_gc = []
     filtered_length = []
-    
+
     for read in mp.fastx_read(args.fastx, read_comment=False):
         qual = read[0].split("_")[-1]
         qual = float(qual)
         rlen = len(read[1])
         gc = gc_fraction(read[1])
         count += 1
-        
+
         # 判断是否通过过滤条件，增加GC含量过滤
-        passed_filter = (qual >= args.quality_cutoff and 
-                        rlen >= args.length_cutoff and 
+        passed_filter = (qual >= args.quality_cutoff and
+                        rlen >= args.length_cutoff and
                         (args.max_length is None or rlen <= args.max_length) and
                         (args.min_gc is None or gc >= args.min_gc) and
                         (args.max_gc is None or gc <= args.max_gc))
-        
+
         if count < args.plot_limit:
             ids.append(read[0])
             quality_for_plot.append(qual)
             len_for_plot.append(rlen)
             gc_for_plot.append(gc)
-            
+
             if passed_filter:
                 filtered_ids.append(read[0])
                 filtered_quality.append(qual)
                 filtered_gc.append(gc)
                 filtered_length.append(rlen)
-                
+
         if args.plot_only == False:
             if passed_filter:
                 print(f"@{read[0]}\n{read[1]}\n+\n{read[2]}", file=fo)
@@ -146,7 +145,7 @@ def main(args):
 
     # dict 2 Pandas DataFrame
     df = pd.DataFrame(data)
-    
+
     # Create DataFrame for filtered data
     filtered_data = {
         'id': filtered_ids,
@@ -203,4 +202,3 @@ Usage: python3 {sys.argv[0]}  -q 7 -l 1000 -g 0.2 -G 0.8 -o output *.fq.gz # fil
         print(f"ploting...")
         stat_plot(df, df_filtered=df_filtered, ax=None,  outpre=args.outpre)
         print("ploting done!")
-     
