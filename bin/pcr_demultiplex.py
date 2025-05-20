@@ -53,33 +53,6 @@ class PCRDemultiplexer:
         """
         return str(Seq(sequence).reverse_complement())
 
-    def needleman_wunsch(self, seq1, seq2, match_score=2, mismatch_score=-1, indel_score=-2):
-        """
-        Optimized Needleman-Wunsch algorithm that terminates early for impossible matches
-        """
-        m, n = len(seq1), len(seq2)
-        max_allowed_penalty = min(self.primer_max_mismatch, self.index_max_mismatch)
-        min_required_score = len(seq2) - max_allowed_penalty
-
-        if abs(m - n) > max_allowed_penalty:
-            return float('-inf')
-
-        score_matrix = np.zeros((m+1, n+1))
-
-        for i in range(m+1):
-            score_matrix[i][0] = i * indel_score
-        for j in range(n+1):
-            score_matrix[0][j] = j * indel_score
-
-        for i in range(1, m+1):
-            if score_matrix[i][0] < min_required_score - (n * match_score):
-                return float('-inf')
-            for j in range(1, n+1):
-                match = score_matrix[i-1][j-1] + (match_score if seq1[i-1] == seq2[j-1] else mismatch_score)
-                delete = score_matrix[i-1][j] + indel_score
-                insert = score_matrix[i][j-1] + indel_score
-                score_matrix[i][j] = max(match, delete, insert)
-        return score_matrix[m][n]
 
     def smith_waterman(self, seq1, seq2, match_score=2, mismatch_score=-1, indel_score=-2):
         """
@@ -138,7 +111,7 @@ class PCRDemultiplexer:
 
         for id_value, index_seq in index_sequences:
             score, start_pos, end_pos = self.smith_waterman(search_region, index_seq)
-            #ic(search_region, id_value, index_seq, score, end_pos)
+            ic(search_region, id_value, index_seq, score, end_pos)
             score_rc, start_pos_rc, end_pos_rc = self.smith_waterman(search_region, self.index_rc_cache[index_seq])
 
             threshold = len(index_seq) * 2 - (max_mismatch * 1 + max_indel * 2)
@@ -209,9 +182,8 @@ class PCRDemultiplexer:
                 rp_rc_pos = sequence.index(self.reverse_primer_rc)
                 logs.append(f"Reverse primer RC: EXACT match at position {rp_rc_pos}")
             except ValueError:
-                max_score, end_pos = self.smith_waterman(sequence, self.reverse_primer_rc)
+                max_score, rp_rc_pos, end_pos = self.smith_waterman(sequence, self.reverse_primer_rc)
                 if max_score >= len(self.reverse_primer_rc) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_indel * 2):
-                    rp_rc_pos = end_pos - len(self.reverse_primer_rc)
                     mismatches = len(self.reverse_primer_rc) * 2 - max_score
                     indels = mismatches // 2
                     mismatches = mismatches - (indels * 2)
@@ -299,9 +271,8 @@ class PCRDemultiplexer:
             rp_pos = sequence.index(self.reverse_primer)
             logs.append(f"Reverse primer: EXACT match at position {rp_pos}")
         except ValueError:
-            max_score, end_pos = self.smith_waterman(sequence, self.reverse_primer)
+            max_score, rp_pos, end_pos = self.smith_waterman(sequence, self.reverse_primer)
             if max_score >= len(self.reverse_primer) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_indel * 2):
-                rp_pos = end_pos - len(self.reverse_primer)
                 mismatches = len(self.reverse_primer) * 2 - max_score
                 indels = mismatches // 2
                 mismatches = mismatches - (indels * 2)
@@ -315,9 +286,8 @@ class PCRDemultiplexer:
                 fp_rc_pos = sequence.index(self.forward_primer_rc)
                 logs.append(f"Forward primer RC: EXACT match at position {fp_rc_pos}")
             except ValueError:
-                max_score, end_pos = self.smith_waterman(sequence, self.forward_primer_rc)
+                max_score, fp_rc_pos, end_pos = self.smith_waterman(sequence, self.forward_primer_rc)
                 if max_score >= len(self.forward_primer_rc) * 2 - (self.primer_max_mismatch * 1 + self.primer_max_indel * 2):
-                    fp_rc_pos = end_pos - len(self.forward_primer_rc)
                     mismatches = len(self.forward_primer_rc) * 2 - max_score
                     indels = mismatches // 2
                     mismatches = mismatches - (indels * 2)
