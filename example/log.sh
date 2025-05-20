@@ -1,0 +1,1 @@
+python3 ../bin/pcr_demultiplex.py -p primer.txt --plate-index plate.index.tsv --well-index cell.index.tsv -f test.fa  -o out  --primer_max_mismatch 3 --primer_max_indel 3 --index_max_mismatch 2 --index_max_indel 1
