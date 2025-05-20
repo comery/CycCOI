@@ -111,7 +111,7 @@ class PCRDemultiplexer:
 
         for id_value, index_seq in index_sequences:
             score, start_pos, end_pos = self.smith_waterman(search_region, index_seq)
-            ic(search_region, id_value, index_seq, score, end_pos)
+            #ic(search_region, id_value, index_seq, score, end_pos)
             score_rc, start_pos_rc, end_pos_rc = self.smith_waterman(search_region, self.index_rc_cache[index_seq])
 
             threshold = len(index_seq) * 2 - (max_mismatch * 1 + max_indel * 2)
@@ -170,7 +170,7 @@ class PCRDemultiplexer:
                 mismatches = len(self.forward_primer) * 2 - max_score
                 indels = mismatches // 2
                 mismatches = mismatches - (indels * 2)
-                ic(max_score, mismatches, indels)
+                #ic(max_score, mismatches, indels)
                 logs.append(f"Forward primer: FUZZY match at position {fp_pos}")
                 logs.append(f"Score: {max_score}, Mismatches: {mismatches}, Indels: {indels}")
             else:
