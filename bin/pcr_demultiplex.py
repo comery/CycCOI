@@ -14,7 +14,9 @@ from icecream import ic
 class PCRDemultiplexer:
     def __init__(self, forward_primer, reverse_primer, plate_indices, well_indices,
                  primer_max_mismatch=3, primer_max_indel=1,
-                 index_max_mismatch=4, index_max_indel=1):
+                 index_max_mismatch=4, index_max_indel=1,
+                 log_file=None,
+                 normalize_reverse_forward=False):
         """
         Initialize demultiplexer
         """
@@ -29,6 +31,7 @@ class PCRDemultiplexer:
         self.primer_max_indel = primer_max_indel
         self.index_max_mismatch = index_max_mismatch
         self.index_max_indel = index_max_indel
+        self.log_file = log_file
 
         # 预计算所有可能需要的反向互补序列
         self.index_rc_cache = {}
@@ -354,27 +357,23 @@ class PCRDemultiplexer:
                         logs.append("Well index: NO match found")
             
             if plate_id and well_id:
+                seq_out = sequence[reverse_index_search_start:forward_index_search_end]
+                if self.normalize_reverse_forward:
+                    seq_out = str(Seq(seq_out).reverse_complement())
                 return {
                     'plate_id': plate_id,
                     'well_id': well_id,
-                    'sequence': sequence[reverse_index_search_start:forward_index_search_end],
+                    'sequence': seq_out,
                     'read_id': seq_record.id,
                     'logs': logs
                 }
-            
             return None
 
         return None
 
-    def demultiplex(self, input_file, output_dir, num_processes=None, chunk_size=10000):
-        """
-        按块读取并处理FASTA文件，支持多进程
-        参数:
-            input_file: 输入文件路径
-            output_dir: 输出目录
-            num_processes: 进程数，默认为CPU核心数
-            chunk_size: 每次读取的序列数量，默认为10000
-        """
+    def demultiplex(self, input_file, output_dir, num_processes=None, chunk_size=10000, log_file=None, normalize_reverse_forward=False):
+        if log_file is not None:
+            self.log_file = log_file
         if num_processes is None:
             num_processes = multiprocessing.cpu_count()
 
@@ -384,59 +383,71 @@ class PCRDemultiplexer:
         # 创建进程池
         pool = Pool(processes=num_processes)
 
-        # 用于存储所有结果的字典
-        results = defaultdict(list)
+        # plate_id到文件句柄的映射
+        plate_file_handles = {}
 
-        # 分块读取并处理序列
+        def get_plate_handle(plate_id):
+            if plate_id not in plate_file_handles:
+                output_file = os.path.join(output_dir, f"{plate_id}.fa")
+                plate_file_handles[plate_id] = open(output_file, "a")
+            return plate_file_handles[plate_id]
+
+        total_count = 0
+        success_count = 0
+
         sequences = []
         for record in SeqIO.parse(input_file, "fasta"):
             sequences.append(record)
-
-            # 当累积的序列达到chunk_size时，进行处理
+            total_count += 1
             if len(sequences) >= chunk_size:
-                # 处理当前批次的序列
                 chunk_results = pool.map(self.process_sequence, sequences)
-
-                # 将结果添加到总结果中
                 for result in chunk_results:
                     if result:
-                        # 在主进程中打印日志
+                        success_count += 1
                         if 'logs' in result:
                             for log in result['logs']:
-                                print(log)
-                        
-                        # 将结果添加到对应的plate_id列表中
-                        results[result['plate_id']].append((result['well_id'], result['sequence'], result['read_id']))
-
-                # 清空序列列表，准备下一批
+                                if self.log_file:
+                                    with open(self.log_file, "a") as log_fh:
+                                        log_fh.write(log + "\n")
+                        handle = get_plate_handle(result['plate_id'])
+                        handle.write(f">{result['read_id']}_{result['plate_id']}_{result['well_id']}\n{result['sequence']}\n")
                 sequences = []
-
-        # 处理剩余的序列
+        # 处理剩余
         if sequences:
             chunk_results = pool.map(self.process_sequence, sequences)
             for result in chunk_results:
                 if result:
-                    # 在主进程中打印日志
+                    success_count += 1
                     if 'logs' in result:
                         for log in result['logs']:
-                            print(log)
-                    
-                    # 将结果添加到对应的plate_id列表中
-                    results[result['plate_id']].append((result['well_id'], result['sequence'], result['read_id']))
+                            if self.log_file:
+                                with open(self.log_file, "a") as log_fh:
+                                    log_fh.write(log + "\n")
+                    handle = get_plate_handle(result['plate_id'])
+                    handle.write(f">{result['read_id']}_{result['plate_id']}_{result['well_id']}\n{result['sequence']}\n")
 
-        # close pool
         pool.close()
         pool.join()
+        
+        # 关闭所有文件
+        try:
+            if plate_file_handles is not None:
+                for handle in plate_file_handles.values():
+                    if handle is not None:
+                        handle.close()
+        except Exception as e:
+            print(f"Error occurred during closing file handles: {e}")
 
-        # output
-        for plate_id, sequences_list in results.items():
-            output_file = os.path.join(output_dir, f"{plate_id}.fa")
-            with open(output_file, "w") as f:
-                for well_id, seq, original_read_id in sequences_list:
-                    # 构建所需的 ID 格式 >{read_id}_{plate_id}_{well_id}
-                    f.write(f">{original_read_id}_{plate_id}_{well_id}\n{seq}\n")
 
-        return results
+        # 输出拆分成功率
+        print(f"Total processed sequence: {total_count}")
+        print(f"Successfully assigned: {success_count}")
+        if total_count > 0:
+            print(f"Assigning rate: {success_count / total_count:.2%}")
+        else:
+            print("No reads input")
+
+        return None  # 不再返回全部结果，避免内存占用
 
 def read_plate_index_file(plate_index_file):
     """
@@ -521,6 +532,9 @@ def main():
                       help='Number of processes for parallel processing, default uses all available CPU cores')
     parser.add_argument('-c', '--chunk_size', type=int, default=10000,
                       help='Number of sequences to process in each chunk')
+    parser.add_argument('--log_file', type=str, default='assign.log', help='output log file')
+    parser.add_argument('-norm', '--normalize_reverse_forward', action='store_true',
+                      help='Output reverse-forward structure sequences as forward-reverse structure')
 
     args = parser.parse_args()
 
@@ -562,18 +576,16 @@ def main():
 
     # Create demultiplexer instance
     demultiplexer = PCRDemultiplexer(forward_primer, reverse_primer,
-                                    plate_indices, well_indices,
-                                    args.primer_max_mismatch, args.primer_max_indel,
-                                    args.index_max_mismatch, args.index_max_indel
-                                    )
+                                plate_indices, well_indices,
+                                args.primer_max_mismatch, args.primer_max_indel,
+                                args.index_max_mismatch, args.index_max_indel,
+                                args.log_file,
+                                args.normalize_reverse_forward
+                                )
 
     # Process sequences
     try:
-        results = demultiplexer.demultiplex(args.fa, args.output, args.num_processes)
-        print("==========================================")
-        print(f"Sequence demultiplexing completed, processed {sum(len(records) for records in results.values())} sequences")
-        for combined_id, records in results.items():
-            print(f"ID {combined_id}: {len(records)} sequences")
+        demultiplexer.demultiplex(args.fa, args.output, args.num_processes)
     except Exception as e:
         print(f"Error occurred during processing: {str(e)}")
         sys.exit(1)
