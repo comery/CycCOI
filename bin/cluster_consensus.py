@@ -2,7 +2,8 @@ import argparse
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-from Bio.Align import AlignIO, MultipleSeqAlignment
+from Bio import AlignIO
+from Bio.Align import MultipleSeqAlignment
 from Bio.Align.AlignInfo import SummaryInfo
 from collections import defaultdict, Counter
 import subprocess
@@ -187,14 +188,7 @@ def run_mafft_msa(sequences_for_msa, mafft_path, temp_dir_cluster):
     return msa_output_path
 
 def get_consensus_from_msa(msa_filepath, original_centroid_id, abundance, plate_id, well_id, cluster_num):
-    """
-    Generates a consensus sequence from an MSA file.
-    msa_filepath: path to the MSA file (FASTA format).
-    original_centroid_id: ID of the centroid for this cluster.
-    abundance: number of sequences in this cluster.
-    plate_id, well_id, cluster_num: for naming the consensus sequence.
-    Returns a SeqRecord for the consensus sequence or None.
-    """
+    """Generates a consensus sequence from an MSA file with custom consensus logic."""
     try:
         alignment = AlignIO.read(msa_filepath, "fasta")
         if not alignment:
@@ -206,22 +200,74 @@ def get_consensus_from_msa(msa_filepath, original_centroid_id, abundance, plate_
             consensus_id = f"{plate_id}_{well_id}_Cluster{cluster_num}_Abundance{abundance}_CentroidIsSelf_{alignment[0].id}"
             return SeqRecord(consensus_seq, id=consensus_id, description="Consensus from single-sequence cluster")
 
-        summary_align = SummaryInfo(alignment)
-        # Default threshold for consensus is 0.7, ambiguous char is 'N'
-        # You can customize these, e.g., summary_align.dumb_consensus(threshold=0.5, ambiguous='X')
-        consensus_seq = summary_align.dumb_consensus(ambiguous='N') 
+        # 自定义consensus逻辑，替代原来的dumb_consensus
+        con_len = alignment.get_alignment_length()
+        consensus = ''
         
-        # Remove gaps from consensus sequence
-        consensus_seq_no_gaps = Seq(str(consensus_seq).replace("-", ""))
-        if not consensus_seq_no_gaps:
-            print(f"Warning: Consensus sequence for cluster (centroid {original_centroid_id}) became empty after gap removal.")
-            return None
-
+        # 遍历每个位置
+        for n in range(con_len):
+            # 统计碱基频率
+            base_counts = {}
+            valid_bases = 0
+            
+            for record in alignment:
+                if n < len(record.seq):
+                    base = record.seq[n]
+                    if base != '-' and base != '.':
+                        valid_bases += 1
+                        if base not in base_counts:
+                            base_counts[base] = 1
+                        else:
+                            base_counts[base] += 1
+            
+            # 如果没有有效碱基，跳过（这会在最终序列中删除该位点）
+            if valid_bases == 0:
+                continue
+                
+            # 找出频率最高的两个碱基
+            sorted_bases = sorted(base_counts.items(), key=lambda x: x[1], reverse=True)
+            
+            # 如果只有一种碱基
+            if len(sorted_bases) == 1:
+                consensus += sorted_bases[0][0]
+            # 如果有多种碱基
+            else:
+                top1_base, top1_count = sorted_bases[0]
+                top2_base, top2_count = sorted_bases[1] if len(sorted_bases) > 1 else (None, 0)
+                
+                # 如果top1频率超过50%
+                if top1_count > valid_bases * 0.5:
+                    consensus += top1_base
+                # 如果top1和top2频率相同
+                elif top1_count == top2_count:
+                    # 这里可以实现简并碱基的逻辑
+                    # 例如：如果是A和G，使用R；如果是C和T，使用Y等
+                    # 简单示例：使用IUPAC简并碱基表示
+                    bases_set = set([b[0] for b in sorted_bases if b[1] == top1_count])
+                    if bases_set == {'A', 'G'}:
+                        consensus += 'R'  # A或G
+                    elif bases_set == {'C', 'T'}:
+                        consensus += 'Y'  # C或T
+                    elif bases_set == {'G', 'C'}:
+                        consensus += 'S'  # G或C
+                    elif bases_set == {'A', 'T'}:
+                        consensus += 'W'  # A或T
+                    elif bases_set == {'G', 'T'}:
+                        consensus += 'K'  # G或T
+                    elif bases_set == {'A', 'C'}:
+                        consensus += 'M'  # A或C
+                    else:
+                        # 其他组合使用N
+                        consensus += 'N'
+                else:
+                    consensus += top1_base
+        
+        # 创建序列对象
+        consensus_seq = Seq(consensus)
         consensus_id = f"{plate_id}_{well_id}_Cluster{cluster_num}_Abundance{abundance}_Centroid_{original_centroid_id}"
-        return SeqRecord(consensus_seq_no_gaps, id=consensus_id, description="Consensus sequence")
+        return SeqRecord(consensus_seq, id=consensus_id, description="Custom consensus sequence")
         
     except ValueError as e:
-        # This can happen if AlignIO.read fails (e.g. empty file, bad format)
         print(f"Error generating consensus for {msa_filepath}: {e}. This might be due to an empty or invalid MSA file.")
         return None
     except Exception as e:
