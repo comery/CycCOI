@@ -16,8 +16,7 @@ class PCRDemultiplexer:
                  primer_max_mismatch=3, primer_max_indel=1,
                  index_max_mismatch=4, index_max_indel=1,
                  log_file=None,
-                 normalize_reverse_forward=False,
-                 keep_primers=False):
+                 normalize_reverse_forward=False):
         """
         Initialize demultiplexer
         """
@@ -33,7 +32,6 @@ class PCRDemultiplexer:
         self.index_max_mismatch = index_max_mismatch
         self.index_max_indel = index_max_indel
         self.log_file = log_file
-        self.keep_primers = keep_primers
 
         # 预计算所有可能需要的反向互补序列
         self.index_rc_cache = {}
@@ -147,7 +145,7 @@ class PCRDemultiplexer:
 
     def process_sequence(self, seq_record):
         sequence = str(seq_record.seq)
-
+        
         # Use a list to collect log information instead of printing directly
         logs = []
         logs.append("==========================================")
@@ -216,14 +214,14 @@ class PCRDemultiplexer:
             if len(reverse_index_search_region) < min_index_length:
                 logs.append("Sequence too short for reverse index extraction")
                 return None
-
+            
             logs.append(f"Forward index search region: {forward_index_search_region}")
             logs.append(f"Reverse index search region: {reverse_index_search_region}")
-
+            
             # Find best matching index sequence in the search region
             plate_id, plate_seq, plate_score, plate_mismatches, plate_indels = self.find_index_in_region(
                 forward_index_search_region, self.plate_indices, is_plate=True)
-
+            
             if plate_id is not None:
                 logs.append(f"Plate index: FUZZY match -> {plate_id}")
                 logs.append(f"Matched sequence: {plate_seq}")
@@ -234,15 +232,15 @@ class PCRDemultiplexer:
                         plate_id = self.plate_dict[seq]
                         logs.append(f"Plate index: EXACT match -> {plate_id}")
                         break
-
+                
                 if plate_id is None:
                     logs.append("Plate index: NO match found")
                     return None
-
+            
             if plate_id is not None:
                 well_id, well_seq, well_score, well_mismatches, well_indels = self.find_index_in_region(
                     reverse_index_search_region, self.well_indices, is_plate=False)
-
+                
                 if well_id is not None:
                     logs.append(f"Well index: FUZZY match -> {well_id}")
                     logs.append(f"Matched sequence: {well_seq}")
@@ -253,25 +251,19 @@ class PCRDemultiplexer:
                             well_id = self.well_dict[seq]
                             logs.append(f"Well index: EXACT match -> {well_id}")
                             break
-
+                    
                     if well_id is None:
                         logs.append("Well index: NO match found")
-
+            
             if plate_id and well_id:
-                if self.keep_primers:
-                    # 保留引物和index序列
-                    seq_out = sequence[forward_index_search_start:reverse_index_search_end]
-                else:
-                    # 去除引物和index序列
-                    seq_out = sequence[fp_pos + len(self.forward_primer):rp_rc_pos]
                 return {
                     'plate_id': plate_id,
                     'well_id': well_id,
-                    'sequence': seq_out,
+                    'sequence': sequence[forward_index_search_start:reverse_index_search_end],
                     'read_id': seq_record.id,
                     'logs': logs
                 }
-
+            
             return None
 
         # Reverse-forward structure
@@ -312,25 +304,25 @@ class PCRDemultiplexer:
             reverse_index_search_end = rp_pos
             reverse_index_search_start = max(0, reverse_index_search_end - (self.index_length + self.index_max_indel))
             reverse_index_search_region = sequence[reverse_index_search_start:reverse_index_search_end]
-
+            
             forward_index_search_start = fp_rc_pos + len(self.forward_primer_rc)
             forward_index_search_end = min(len(sequence), forward_index_search_start + self.index_length + self.index_max_indel)
             forward_index_search_region = sequence[forward_index_search_start:forward_index_search_end]
-
+            
             if len(reverse_index_search_region) < min_index_length:
                 logs.append("Sequence too short for reverse index extraction")
                 return None
-
+                
             if len(forward_index_search_region) < min_index_length:
                 logs.append("Sequence too short for forward index extraction")
                 return None
-
+            
             logs.append(f"Reverse index search region: {reverse_index_search_region}")
             logs.append(f"Forward index search region: {forward_index_search_region}")
-
+            
             plate_id, plate_seq, plate_score, plate_mismatches, plate_indels = self.find_index_in_region(
                 forward_index_search_region, self.plate_indices, is_plate=True)
-
+            
             if plate_id is not None:
                 logs.append(f"Plate index: FUZZY match -> {plate_id}")
                 logs.append(f"Matched sequence: {plate_seq}")
@@ -341,7 +333,7 @@ class PCRDemultiplexer:
                         plate_id = self.plate_dict[seq]
                         logs.append(f"Plate index: EXACT match -> {plate_id}")
                         break
-
+                
                 if plate_id is None:
                     logs.append("Plate index: NO match found")
                     return None
@@ -365,12 +357,7 @@ class PCRDemultiplexer:
                         logs.append("Well index: NO match found")
             
             if plate_id and well_id:
-                if self.keep_primers:
-                    # 保留引物和index序列
-                    seq_out = sequence[reverse_index_search_start:forward_index_search_end]
-                else:
-                    # 去除引物和index序列
-                    seq_out = sequence[rp_pos + len(self.reverse_primer):fp_rc_pos]
+                seq_out = sequence[reverse_index_search_start:forward_index_search_end]
                 if self.normalize_reverse_forward:
                     seq_out = str(Seq(seq_out).reverse_complement())
                 return {
@@ -548,8 +535,6 @@ def main():
     parser.add_argument('--log_file', type=str, default='assign.log', help='output log file')
     parser.add_argument('-norm', '--normalize_reverse_forward', action='store_true',
                       help='Output reverse-forward structure sequences as forward-reverse structure')
-    parser.add_argument('--keep-primers', action='store_true',
-                      help='Keep primer and index sequences in output (default: remove them)')
 
     args = parser.parse_args()
 
@@ -595,7 +580,7 @@ def main():
                                 args.primer_max_mismatch, args.primer_max_indel,
                                 args.index_max_mismatch, args.index_max_indel,
                                 args.log_file,
-                                args.normalize_reverse_forward, args.keep_primers
+                                args.normalize_reverse_forward
                                 )
 
     # Process sequences

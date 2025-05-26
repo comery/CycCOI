@@ -1,0 +1,28 @@
+==========================================
+Processing sequence: 2
+Forward primer: FUZZY match at position 14
+Score: 48.0, Mismatches: 0.0, Indels: 2.0
+Reverse primer RC: FUZZY match at position 681
+Score: 48.0, Mismatches: 0.0, Indels: 1.0
+Forward index search region: AGCAAAGTGGCTCT
+Reverse index search region: ACGCTTCGGTGGCA
+Plate index: FUZZY match -> P10
+Matched sequence: AGCAAAGTGGCTCT
+Score: 24.0, Mismatches: 0.0, Indels: 1.0
+Well index: FUZZY match -> 032
+Matched sequence: CGCTTCGGTGGC
+Score: 24.0, Mismatches: 0.0, Indels: 1.0
+==========================================
+Processing sequence: 2
+Forward primer: FUZZY match at position 14
+Score: 48.0, Mismatches: 0.0, Indels: 2.0
+Reverse primer RC: FUZZY match at position 681
+Score: 48.0, Mismatches: 0.0, Indels: 1.0
+Forward index search region: AGCAAAGTGGCTCT
+Reverse index search region: ACGCTTCGGTGGCA
+Plate index: FUZZY match -> P10
+Matched sequence: AGCAAAGTGGCTCT
+Score: 24.0, Mismatches: 0.0, Indels: 1.0
+Well index: FUZZY match -> 032
+Matched sequence: CGCTTCGGTGGC
+Score: 24.0, Mismatches: 0.0, Indels: 1.0
