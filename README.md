@@ -81,6 +81,12 @@ python3 bin/CycFqFilter.py -q 7 -l 700 -L 770 -g 0.2 -G 0.6 -o test.clean test.f
 $ python3 ../bin/pcr_demultiplex.py -p primer.txt --plate-index plate.index.tsv --well-index cell.index.tsv -f test.fa  -o out  --primer_max_mismatch 3 --primer_max_indel 3 --index_max_mismatch 2 --index_max_indel 1
 ```
 
+3. make consensus sequence for each well
+
+```shell
+python3 ../bin/cluster_consensus.py -i assigned.fa -o cluster --id_threshold 0.95 --keep_temp_files
+```
+
 
 
 
